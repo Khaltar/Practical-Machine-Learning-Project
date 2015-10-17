@@ -1,0 +1,125 @@
+---
+title: "PML Final Project"
+author: "Jose Pereira"
+date: "17 de Outubro de 2015"
+output: html_document
+---
+---
+title: "Practical ML project"
+author: "Jose Pereira"
+date: "17 de Outubro de 2015"
+output: html_document
+---
+
+#Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+#Goal of the project
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases. 
+
+#Data Loading and Cleaning
+
+I will first start by loading the data and defining all blank and badly coded variables as N.A
+```{r}
+train_data <- read.csv("pml-training.csv", sep=",", na.strings = c("", " ", "#DIV/0!","NA"))
+test_data <- read.csv("pml-testing.csv", sep="," ,na.strings = c("", " ", "#DIV/0!","NA"))
+```
+
+I will then check the structure of both datasets
+```{r}
+str(train_data)
+str(test_data)
+```
+
+Since some NAs exist in the data in quite an abundant quantity, I decided to remove those columns that have more than 80% NAs
+
+```{r}
+train_data <- train_data[,colSums(is.na(train_data)) < nrow(train_data) * 0.8]
+test_data <- test_data[,colSums(is.na(test_data)) < nrow(test_data) * 0.8]
+```
+
+Let's remove the columns 1:5 which have data that seems to have no value for making a prediction model.
+
+```{r}
+train_data <- train_data[,-(1:5)]
+test_data <- test_data[,-(1:5)]
+```
+
+#Model building
+In this classification problem, we are mainly worried with accuracy and not the interpretability of the model so I decided to just implement a Random Forest algorithm which is one of the most accurate and efficient ones instead of doing classification trees  or boosting algorithms.
+I will start by setting a seed and loading the caret package and splitting the train_data in a proportion of 70% (the training data) and 30% (a validation set to test the data before applying it to the test data given by professor Leek).
+
+```{r}
+set.seed(19)
+library(caret)
+in_train <- createDataPartition(y=train_data$classe, p = 0.7, list=FALSE)
+training <- train_data[in_train,]
+inside_testing <- train_data[-in_train,]
+```
+
+I will now build a Random Forest model with all variables as predictors using a 4-fold cross validation (will be quicker and Random Forest algorithm doesn't need a really decent cross-validation as it is very resillient by itself)
+
+```{r, cache = TRUE}
+set.seed(14)
+nf  <- trainControl(method="cv", number = 4)
+RFmodel <- train(classe ~ ., 
+                 data=training, 
+                 method="rf", 
+                 importance = TRUE,
+                 trControl = nf)
+```
+
+Let us check the model data, its accuracy and error rate and make a plot of the model. We will also test its accuracy on the validation test data
+
+```{r, cache = TRUE}
+
+RFmodel$finalModel
+plot(RFmodel$finalModel)
+
+predRF <- predict(RFmodel, inside_testing)
+
+confusionMatrix(predRF, inside_testing$classe)
+```
+
+As we can see, the accuracy of this model on the training data validation set is quite good and its out of sample error rate is very low. Let us try to see the predictions in the test data of professor Leek.
+
+```{r}
+final_predictions_perfect <- predict(RFmodel, test_data)
+final_predictions_perfect
+```
+
+Considering the accuracy of this model, the only thing we can do now is to try to make the model creation faster by doing some feature editing and tuning some parameters. Let's start by creating a plot of variable importance.
+
+```{r}
+varImpPlot(RFmodel$finalModel, type=2)
+```
+
+We can see that some variables have more importance in the prediction than others. From the analysis of the past model, we know the perfect mtry is 27 and so we can try to tune nodesize from the default of 1 to a bigger value and try to diminish the number of trees a bit to get a faster model using only the most important variables.
+
+```{r, cache = TRUE, warning = FALSE, message = FALSE}
+tune <- expand.grid(mtry = 28)
+RFmodel2 <- train(classe ~ num_window + roll_belt + pitch_forearm + yaw_belt + magnet_dumbbell_z + magnet_dumbbell_y + pitch_belt,
+                  data = training,
+                  method = "rf",
+                  tuneGrid = tune,
+                  ntree = 250, nodesize = 50)
+```
+
+I will now test the data on both the validation set and the test data of professor Leek to compare the results with the slower model.
+
+```{r, cache = TRUE}
+RFmodel2$finalModel
+RFmodel2
+
+predictions_inside_testing <- predict(RFmodel2, inside_testing)
+confusionMatrix(predictions_inside_testing, inside_testing$classe)
+
+final_predictions_faster <- predict(RFmodel2, test_data)
+
+final_predictions_perfect
+final_predictions_faster
+```
+
+We can see the accuracy and out of sample error of this model is not that different from the slower one and the test predictions are as accurate as those from the slower model, while being much faster to build. This proves how important it is to fine-tune the built models in order to gain the perfect balance between accuracy and speed.
+
